@@ -12,7 +12,6 @@ To build this package, make sure you have a ROS 2 workspace set up. Then, clone 
 cd ~/limo_ros2_workspace/src
 git clone https://github.com/idra-lab/slam-competition.git
 cd ~/limo_ros2_workspace
-colcon build
 ```
 
 ```bash 
