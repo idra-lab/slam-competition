@@ -44,9 +44,9 @@ class SlamBagProcessor(Node):
             '/imu': 'Imu',
             '/map': 'OccupancyGrid',
             '/tf': 'TFMessage',
-            'camera/color/image_raw': 'Image',
-            'camera/depth/points': 'PointCloud2',
-            'camera/depth/camera_info': 'CameraInfo',
+            '/camera/color/image_raw': 'Image',
+            '/camera/depth/points': 'PointCloud2',
+            '/camera/depth/camera_info': 'CameraInfo',
         }
 
 
@@ -60,7 +60,7 @@ class SlamBagProcessor(Node):
         self.reader.open(storage_options, converter_options)
 
 
-        self.timer = self.create_timer(0.01, self.timer_callback)
+        self.timer = self.create_timer(0.001, self.timer_callback)
 
 
         # Republishers
@@ -68,6 +68,9 @@ class SlamBagProcessor(Node):
         self.scan_publisher = self.create_publisher(globals()[self.topic_types_mappings['/scan']], '/scan', 10)
         self.imu_publisher = self.create_publisher(globals()[self.topic_types_mappings['/imu']], '/imu', 10)
         self.map_publisher = self.create_publisher(globals()[self.topic_types_mappings['/map']], '/map', 10)
+        self.image_publisher = self.create_publisher(globals()[self.topic_types_mappings['/camera/color/image_raw']], '/camera/color/image_raw', 10)
+        self.pointcloud_publisher = self.create_publisher(globals()[self.topic_types_mappings['/camera/depth/points']], '/camera/depth/points', 10)
+        self.camerainfo_publisher = self.create_publisher(globals()[self.topic_types_mappings['/camera/depth/camera_info']], '/camera/depth/camera_info', 10)
         self.tf_broadcaster = TransformBroadcaster(self)
         self.tf_static_broadcaster = StaticTransformBroadcaster(self)
 
@@ -84,21 +87,65 @@ class SlamBagProcessor(Node):
         self.publish_static_transform()
 
     def publish_static_transform(self):
-        tf_static = TransformStamped()
 
-        tf_static.header.stamp = self.get_clock().now().to_msg()
-        tf_static.header.frame_id = 'base_link'
-        tf_static.child_frame_id = 'laser_frame'
-        tf_static.transform.translation.x = 0.2
-        tf_static.transform.translation.y = 0.0
-        tf_static.transform.translation.z = 0.02
-        tf_static.transform.rotation.x = 0.0
-        tf_static.transform.rotation.y = 0.0
-        tf_static.transform.rotation.z = 0.0
-        tf_static.transform.rotation.w = 1.0
+        tf_base_to_laser = TransformStamped()
 
-        self.publisher_dict['/tf_static'].sendTransform(tf_static)
+        tf_base_to_laser.header.stamp = self.get_clock().now().to_msg()
+        tf_base_to_laser.header.frame_id = 'base_link'
+        tf_base_to_laser.child_frame_id = 'laser_link'
+        tf_base_to_laser.transform.translation.x = 0.18
+        tf_base_to_laser.transform.translation.y = 0.0
+        tf_base_to_laser.transform.translation.z = 0.02
+        tf_base_to_laser.transform.rotation.x = 0.0
+        tf_base_to_laser.transform.rotation.y = 0.0
+        tf_base_to_laser.transform.rotation.z = 0.0
+        tf_base_to_laser.transform.rotation.w = 1.0
 
+        self.publisher_dict['/tf_static'].sendTransform([tf_base_to_laser])
+
+
+        tf_base_to_camera = TransformStamped()
+        tf_base_to_camera.header.stamp = self.get_clock().now().to_msg()
+        tf_base_to_camera.header.frame_id = 'base_link'
+        tf_base_to_camera.child_frame_id = 'camera_link'
+        tf_base_to_camera.transform.translation.x = 0.18
+        tf_base_to_camera.transform.translation.y = 0.0
+        tf_base_to_camera.transform.translation.z = 0.18
+        tf_base_to_camera.transform.rotation.x = 0.0
+        tf_base_to_camera.transform.rotation.y = 0.0
+        tf_base_to_camera.transform.rotation.z = 0.0
+        tf_base_to_camera.transform.rotation.w = 1.0
+        self.publisher_dict['/tf_static'].sendTransform([tf_base_to_camera])
+
+        tf_base_to_imu = TransformStamped()
+        tf_base_to_imu.header.stamp = self.get_clock().now().to_msg()
+        tf_base_to_imu.header.frame_id = 'base_link'
+        tf_base_to_imu.child_frame_id = 'imu_link'
+        tf_base_to_imu.transform.translation.x = 0.0
+        tf_base_to_imu.transform.translation.y = 0.0
+        tf_base_to_imu.transform.translation.z = 0.0
+        tf_base_to_imu.transform.rotation.x = 0.0
+        tf_base_to_imu.transform.rotation.y = 0.0
+        tf_base_to_imu.transform.rotation.z = 0.0
+        tf_base_to_imu.transform.rotation.w = 1.0
+        self.publisher_dict['/tf_static'].sendTransform([tf_base_to_imu])
+
+
+        tf_cam_to_optical = TransformStamped()
+        tf_cam_to_optical.header.stamp = self.get_clock().now().to_msg()
+        tf_cam_to_optical.header.frame_id = 'camera_link'
+        tf_cam_to_optical.child_frame_id = 'camera_depth_optical_frame'
+        quat_opti = TF.Rotation.from_euler('xyz', [-90, 0, -90], degrees=True).as_quat()
+
+        tf_cam_to_optical.transform.translation.x = 0.0
+        tf_cam_to_optical.transform.translation.y = 0.0
+        tf_cam_to_optical.transform.translation.z = 0.0
+        tf_cam_to_optical.transform.rotation.x = quat_opti[0]
+        tf_cam_to_optical.transform.rotation.y = quat_opti[1]
+        tf_cam_to_optical.transform.rotation.z = quat_opti[2]
+        tf_cam_to_optical.transform.rotation.w = quat_opti[3]
+        self.publisher_dict['/tf_static'].sendTransform([tf_cam_to_optical])
+        
         self.transform_initialized_flag = True
 
     def timer_callback(self):
@@ -112,9 +159,7 @@ class SlamBagProcessor(Node):
                 # print("Unknown Topic Type")
                 return
             
-            
-
-            
+         
             msg_deserialized = deserialize_message(msg[1], globals()[topic_type])
 
             # build handler method name, e.g. "process_Odometry_msg"
@@ -133,6 +178,8 @@ class SlamBagProcessor(Node):
             print("Bag Exhausted")
             self.evaluate_slam()
             self.timer.cancel()
+            self.shutdown_node()
+            sys.shutdown(0)
 
 
     def evaluate_slam(self):
@@ -142,18 +189,17 @@ class SlamBagProcessor(Node):
         pass
 
     def process_Odometry_msg(self, odom_msg):
-        print("Publishing Odometry Message")
+        # print("Publishing Odometry Message")
         self.publisher_dict['/odom'].publish(odom_msg)
         pass
 
     def process_LaserScan_msg(self, scan_msg):
-        print("Publishing Laser Scan Message")
-        scan_msg.header.frame_id = 'laser_frame'
+        # print("Publishing Laser Scan Message")
         self.publisher_dict['/scan'].publish(scan_msg)
         pass
 
     def process_Imu_msg(self, imu_msg):
-        print("Publishing IMU Message")
+        # print("Publishing IMU Message")
         self.publisher_dict['/imu'].publish(imu_msg)
         pass
 
@@ -166,12 +212,15 @@ class SlamBagProcessor(Node):
         pass
 
     def process_Image_msg(self, image_msg):
+        self.image_publisher.publish(image_msg)
         pass
 
     def process_PointCloud2_msg(self, pointcloud2_msg):
+        self.pointcloud_publisher.publish(pointcloud2_msg)
         pass
 
     def process_CameraInfo_msg(self, camera_info_msg):
+        self.camerainfo_publisher.publish(camera_info_msg)
         pass
 
 def main(args=None):
