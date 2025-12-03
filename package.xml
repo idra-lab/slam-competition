@@ -7,6 +7,15 @@
   <maintainer email="tommaso.faraci3@gmail.com">tom</maintainer>
   <license>TODO: License declaration</license>
 
+  <depend>cv_bridge</depend>
+  <depend>sensor_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>nav_msgs</depend>
+
+
+  <!-- <exec_depend>limo_msgs</exec_depend> -->
+  <exec_depend>tf2_ros</exec_depend>
+
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>
   <test_depend>ament_pep257</test_depend>
