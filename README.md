@@ -33,3 +33,8 @@ To run everythoing use the following command:
 ros2 launch slam_competition slam_competition.launch.py
 ```
 
+### Maintainer
+
+Tommaso Faraci
+Universita' di Trento
+mail: tommaso.faraci@unitn.it
