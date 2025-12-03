@@ -2,7 +2,7 @@
 from  slam_competition.slam_competition_lib import *
 
 
-
+from slam_competition.imu_integrator import integrate_imu_measurements
 
 
 
@@ -17,6 +17,8 @@ class SlamBagProcessor(Node):
         self.declare_parameter('map_path', 'src/slam_competition/assets/map.pgm')
 
         self.reader = rosbag2_py.SequentialReader()
+
+        self.bag_exhausted_flag = False
 
         # Topic containers
         self.odometry_list = []
@@ -60,7 +62,7 @@ class SlamBagProcessor(Node):
         self.reader.open(storage_options, converter_options)
 
 
-        self.timer = self.create_timer(0.001, self.timer_callback)
+        self.timer = self.create_timer(0.005, self.timer_callback)
 
 
         # Republishers
@@ -85,6 +87,17 @@ class SlamBagProcessor(Node):
         self.publisher_dict['/tf_static'] = self.tf_static_broadcaster
 
         self.publish_static_transform()
+
+        # Results Publishers
+        self.imu_path_publisher = self.create_publisher(Path, '/imu_integrated_path', 10)
+
+
+    """  
+    
+    Callback Functions
+    
+    
+    """
 
     def publish_static_transform(self):
 
@@ -149,6 +162,7 @@ class SlamBagProcessor(Node):
         self.transform_initialized_flag = True
 
     def timer_callback(self):
+        
 
         if self.reader.has_next():
             msg = self.reader.read_next()
@@ -178,15 +192,9 @@ class SlamBagProcessor(Node):
             print("Bag Exhausted")
             self.evaluate_slam()
             self.timer.cancel()
-            self.shutdown_node()
-            sys.shutdown(0)
-
-
-    def evaluate_slam(self):
-        pass
-
-    def initialize_transforms(self, tf_msg):
-        pass
+            self.bag_exhausted_flag = True
+            sys.exit()
+        
 
     def process_Odometry_msg(self, odom_msg):
         # print("Publishing Odometry Message")
@@ -201,7 +209,10 @@ class SlamBagProcessor(Node):
     def process_Imu_msg(self, imu_msg):
         # print("Publishing IMU Message")
         self.publisher_dict['/imu'].publish(imu_msg)
-        pass
+
+        self.imu_list.append(imu_msg)
+
+
 
     def process_TFMessage_msg(self, tf_msg):
         self.publisher_dict['/tf'].sendTransform(tf_msg.transforms)
@@ -222,6 +233,30 @@ class SlamBagProcessor(Node):
     def process_CameraInfo_msg(self, camera_info_msg):
         self.camerainfo_publisher.publish(camera_info_msg)
         pass
+
+
+    """ 
+
+    Evaluation Functions 
+    
+    """
+
+    def integrate_all_imu(self):
+        imu_path = integrate_imu_measurements(self.imu_list)
+
+        imu_path.header.stamp = self.get_clock().now().to_msg()
+        imu_path.header.frame_id = 'map'
+
+        self.imu_path_publisher.publish(imu_path)
+
+
+    def evaluate_slam(self):
+        self.integrate_all_imu()
+
+        print("Integrated all IMU measurements for evaluation.")
+        
+
+    
 
 def main(args=None):
 

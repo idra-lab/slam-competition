@@ -26,10 +26,10 @@ source install/setup.bash
 ## Bag
 Store the bag in the folder: `~/your_ros2_workspace/src/slam-competition/assets/`
 
-## Running the SLAM Bag Processor
-To run the SLAM Bag Processor node, use the following command:
+## Running the Code and visualizing the results
+To run everythoing use the following command:
 
 ```bash
-ros2 run slam_competition slam_bag_processor --ros-args -p bag_uri:=/path/to/your/bagfile
+ros2 launch slam_competition slam_competition.launch.py
 ```
 

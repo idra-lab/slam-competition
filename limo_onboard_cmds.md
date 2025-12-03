@@ -12,5 +12,5 @@ ros2 launch limo_bringup cartographer.launch.py
 
 ros2 launch nav2_bringup navigation_launch.py
 
-ros2 bag record -a -o mapping_0
+ros2 bag record -a -o mapping
 
