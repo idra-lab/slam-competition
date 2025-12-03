@@ -2,14 +2,16 @@
 
 This package will introduce you to the SLAM competition environment. 
 
-## Building
+## Download and Build
+
+Star the repository and clone it to your ROS 2 workspace.
 
 To build this package, make sure you have a ROS 2 workspace set up. Then, clone the repository into the `src` directory of your workspace and build it using `colcon`:
 
 ```bash
-cd ~/your_ros2_workspace/src
-git clone https://github.com/your_username/slam-competition.git
-cd ~/your_ros2_workspace
+cd ~/limo_ros2_workspace/src
+git clone https://github.com/idra-lab/slam-competition.git
+cd ~/limo_ros2_workspace
 colcon build
 ```
 
