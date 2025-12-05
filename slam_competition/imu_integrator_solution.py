@@ -48,64 +48,72 @@ def integrate_imu_measurements(imu_measurements) -> Path:
     angular_velocity = np.array([0, 0, 0], dtype=np.float64)        # No initial angular velocity
 
     timestamp_prev = None
+    timestamp_0 = None
 
     pth = Path()
+     
     
-    first_imu = next(iter(imu_measurements))
-    pth.header = first_imu.header
 
-    pose = PoseStamped()
-    timestamp_prev = first_imu.header.stamp.sec + first_imu.header.stamp.nanosec * 1e-9
-    pose.header = first_imu.header
-    pose.pose.position.x, pose.pose.position.y, pose.pose.position.z = _position
-    pose.pose.orientation.x, pose.pose.orientation.y, pose.pose.orientation.z, pose.pose.orientation.w = _orientation
-    pth.poses.append(pose)
 
     for imu_msg in imu_measurements: 
 
+        # Get timestamp
         timestamp = imu_msg.header.stamp.sec + imu_msg.header.stamp.nanosec * 1e-9
-        dt = timestamp - timestamp_prev
-        if (dt<=0.0):
-            continue
 
-        print("Dtime between measurements:", dt)
-        linear_acceleration = np.array([imu_msg.linear_acceleration.x,
-                                        imu_msg.linear_acceleration.y,
-                                        imu_msg.linear_acceleration.z], dtype=np.float64)
-        
-        print("Linear Acceleration:", linear_acceleration)
+        # Check initialization
+        if timestamp_prev is None:
+            timestamp_prev = timestamp
 
-        angular_velocity = np.array([imu_msg.angular_velocity.x,
-                                     imu_msg.angular_velocity.y,
-                                     imu_msg.angular_velocity.z], dtype=np.float64)
+            #Write path message header to match imu messages 
+            pth.header = imu_msg.header
+        else: 
+            
+            #Compute delta t
+            dt = timestamp - timestamp_prev
+
+            # Verify it is never below or equal to zero
+            if (dt<=0.0):
+                continue
+
+            # Compute the rotation matrix from the orientation
+            rotmat = TF.Rotation.from_quat(_orientation).as_matrix()
+
+            # Rotate and correct acceleration for gravity
+            world_acceleration = rotmat @ linear_acceleration - np.array([0, 0, 9.81], dtype=np.float64)
+
+            # Perform Euler integration
+            _position += _velocity * dt + 0.5 * world_acceleration * dt**2
+            _velocity += world_acceleration * dt
 
 
-        rotmat = TF.Rotation.from_quat(_orientation).as_matrix()
-        world_acceleration = rotmat @ linear_acceleration - np.array([0, 0, 9.81], dtype=np.float64)
+            # Update orientation: 
+            # Compute the quaternion derivative
+            big_omega = quaternion_omega_matrix(angular_velocity)
+            dq_dt = 0.5 * big_omega @ _orientation
 
+            # Integrate the derivative
+            _orientation += dq_dt * dt
 
-        _position += _velocity * dt + 0.5 * world_acceleration * dt**2
-        _velocity += world_acceleration * dt
+            # Normalize the quaternion
+            _orientation /= np.linalg.norm(_orientation)  # Normalize quaternion
 
-        print("DT:", dt)
-
-        print("Position:", _position)
-
-        world_angular_velocity = rotmat @ angular_velocity
-
-        big_omega = quaternion_omega_matrix(world_angular_velocity)
-        dq_dt = 0.5 * big_omega @ _orientation
-        _orientation += dq_dt * dt
-        _orientation /= np.linalg.norm(_orientation)  # Normalize quaternion
-
+        # Append the current pose to the path
         pose = PoseStamped()
-        # pose.header = imu_msg.header
         pose.header.frame_id = 'map'
         pose.pose.position.x, pose.pose.position.y, pose.pose.position.z = _position
         pose.pose.orientation.x, pose.pose.orientation.y, pose.pose.orientation.z, pose.pose.orientation.w = _orientation
         pth.poses.append(pose)
 
+        # Update the measurements for next iteration
+        linear_acceleration = np.array([imu_msg.linear_acceleration.x,
+                                        imu_msg.linear_acceleration.y,
+                                        imu_msg.linear_acceleration.z], dtype=np.float64)
+        angular_velocity    = np.array([imu_msg.angular_velocity.x,
+                                        imu_msg.angular_velocity.y,
+                                        imu_msg.angular_velocity.z], dtype=np.float64)
+
         timestamp_prev = timestamp
+
 
     return pth
 
