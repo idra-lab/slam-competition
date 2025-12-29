@@ -35,7 +35,7 @@ class Unicycle:
 
         self.states_log = [self.state.copy()]
 
-        self.K_p = np.array([0.5, 0.5], dtype=float)  # Proportional gains for v and theta
+        self.K_p = np.array([0.5, 2.0], dtype=float)  # Proportional gains for v and theta
 
     
     def dynamics(self, state, u_cmd):
@@ -66,6 +66,8 @@ class Unicycle:
 
         error = u_cmd - np.array([v, theta], dtype=float)
 
+        error[1] = (error[1] + np.pi) % (2 * np.pi) - np.pi  # wrap angle error to [-pi, pi]
+
 
         self.u = self.K_p * error # Acceleration and angular velocity commands are obtained proportionally
 
@@ -87,87 +89,27 @@ class KeyboardController:
     def __init__(self, uni):
         self.uni = uni
 
-        self.v_cmd = 0.0      # linear acceleration increment
-        self.theta_cmd = 0.0   # angular velocity increment
+        self.v_cmd = 0.0      # linear velocity command
+        self.theta_cmd = 0.0   # angular velocity command
 
-        self.delta_v = 1.0   # linear acceleration step
-        self.delta_theta = np.pi / 6  # angular velocity step
+        self.delta_v = 1.0   # linear velocity step
+        self.delta_theta = np.pi / 6  # heading step
 
     def on_key(self, event):
-        # key press: apply command and keep it until release (like an accelerator)
+
         if event.key == "up":
             self.uni.v_cmd += self.delta_v
         elif event.key == "down":
             self.uni.v_cmd -= self.delta_v
         elif event.key == "left":
             self.uni.theta_cmd += self.delta_theta
-            self.uni.theta_cmd = (self.uni.theta_cmd + np.pi) % (2 * np.pi) - np.pi
         elif event.key == "right":
             self.uni.theta_cmd -= self.delta_theta
-            self.uni.theta_cmd = (self.uni.theta_cmd + np.pi) % (2 * np.pi) - np.pi
         elif event.key == " ":
             # immediate stop / brake
             self.uni.v_cmd = 0.0
             self.uni.theta_cmd = 0.0
             
-
-    
-        
-
-class Simulation: 
-
-    def __init__(self):
-        text = "Unicycle Simulation"
-
-        print(pyfiglet.figlet_format(text, font='slant'))
-
-        print("-Up/Down to increase/decrease forward acceleration\n-Left/Right to increase/decrease angular speed\n-Space to stop\n-Close the plot with 'q' window to exit.")
-        self.uni = Unicycle()
-
-        self.ctrl = KeyboardController(self.uni)
-
-        self.fig, self.ax = plt.subplots()
-        self.ax.set_aspect("equal")
-        self.ax.set_xlim(AREA_LOWER_BOUND-1, AREA_UPPER_BOUND+1)
-        self.ax.set_ylim(AREA_LOWER_BOUND-1, AREA_UPPER_BOUND+1)
-        self.ax.grid(True)
-
-        # robot body marker
-        self.body, = self.ax.plot([], [], "bo", markersize=8)
-        # heading arrow
-        self.head, = self.ax.plot([], [], "r-", linewidth=2)
-
-        self.trajectory, = self.ax.plot([], [], "g--", linewidth=1)
-
-    def init_sim(self):
-        self.body.set_data([], [])
-        self.head.set_data([], [])
-        return self.body, self.head
-    
-    def update(self, frame): 
-
-        self.uni.step()
-
-        x, y, v, th = self.uni.state
-
-        self.body.set_data([x], [y])
-
-        # heading arrow length
-        hx = x + HEADING_ARROW_LENGTH * np.cos(th)
-        hy = y + HEADING_ARROW_LENGTH * np.sin(th)
-        self.head.set_data([x, hx], [y, hy])
-
-        # update trajectory
-        self.trajectory.set_data(*zip(*[state[:2] for state in self.uni.states_log]))
-
-        return self.body, self.head, self.trajectory
-    
-    def run(self): 
-
-        self.fig.canvas.mpl_connect("key_press_event", self.ctrl.on_key)
-        self.ani = FuncAnimation(self.fig, self.update, init_func=self.init_sim, interval=20, blit=True, cache_frame_data=False)
-
-        plt.show()
 
 
 # ----------------------------
@@ -178,7 +120,7 @@ class IMU:
     Planar IMU:
       - gyro_z
       - accel_body (ax, ay)
-    Using finite differences of world velocity to get world acceleration.
+    Compute acceleration and angular velocity in body frame with noise.
     """
     def __init__(self, dt,
                  gyro_bias=0.001, accel_bias=(0.005, -0.003),
@@ -225,11 +167,9 @@ class IMU:
         gyro_z = (omega + self.bg) + self.gyro_noise_std * self.rng.normal()
         accel_b = (ab + self.ba) + self.accel_noise_std * self.rng.normal(size=2)
         
-        # accel_b = ab 
-        # gyro_z = omega 
-
         meas = np.array([accel_b[0], accel_b[1], gyro_z]).reshape((3,1))
         self.log.append(meas)
+
         return meas
 
 
@@ -248,159 +188,275 @@ class Camera:
 
     def project(self, landmark_pos, robot_pos, R_BW):
 
+        # Transform landmark to body frame
         landmark_body = R_BW @ (landmark_pos - robot_pos)
+
+        # Fix numpy shape to have awkward matrix multiplication
         landmark_body = landmark_body.reshape((2, 1))
+
         # Simple projection ignoring distortion etc.
         l_hat_b = landmark_body / landmark_body[0]  # Normalize by x (assuming pinhole at x=1)
         u = self.intrinsics @ l_hat_b  # focal_length * y + principal_point
-        return u  # Placeholder projection
+
+        return u  # 1 Dimensional pixel measurement
 
     def check_fov(self, landmark_pos, robot_pos, robot_theta):
-        # Placeholder for field of view check
-
+        """
+        Fied of view check for a landmark given robot position and orientation."""
+    
+        # Compute distance vector 
         dist = landmark_pos - robot_pos
-        angle = np.arctan2(dist[1], dist[0])
 
+        # Transform to body frame
         l_b = rot2(-robot_theta) @ dist
+        
+        # Compute angle wrt robot heading
         angle = np.arctan2(l_b[1], l_b[0])
 
+        # Check depth 
         if l_b[0] <= self.min_range or l_b[0] >= self.max_range:
             return False 
+        
+        # Check angle within FOV
         if angle > self.fov / 2 or angle < -self.fov / 2:
             return False
         
-        
-
+        # Landmark is visible
         return True
     
+
     def step(self, landmarks, robot_pos, robot_theta):
+        """
+        Based on robot pose, simulate camera measurements of visible landmarks.
+        """
+
+        # Dictionary of measurements
         measurements =  {'landmarks': [], 'pixels': []}
-        R_BW = rot2(robot_theta).T  # Rotation from world to body frame
+
+        # Compute rotation matrix from world to body frame
+        R_BW = rot2(robot_theta).T  # Rotation from world to body frame is nothing more than the transpose of the rotation from body frame to world (What we use to describe the robot's orientation)
+
+        # Iterate over all landmarks and check visibility
         for lm in landmarks:
+
+            # Check if landmark is in FOV
             if self.check_fov(lm, robot_pos, robot_theta):
+
+                # Project landmark to pixel coordinates
                 z = self.project(lm, robot_pos, R_BW)
-                z += self.noise * np.random.normal(size=1)  # Add noise
+
+                # Introduce fictitious noise
+                z += self.noise * np.random.normal(size=1) 
+
+                # Append measurements and associated landmark
                 measurements['landmarks'].append(lm)
                 measurements['pixels'].append(z)
+                
         return measurements
     
 # ----------------------------
 # Simulation with EKF
 # ----------------------------
 class SimulationWithEstimation():
+    """
+    Simulate a unicycle robot with IMU and camera, and estimate its state using an Extended Kalman Filter.
+    """
 
     def __init__(self):
+
+        
         text = "Unicycle Simulation with Estimation"
 
         print(pyfiglet.figlet_format(text, font='slant'))
 
-        print("-Up/Down to increase/decrease forward speed\n-Left/Right to increase/decrease angular speed\n-Space to stop\n-Close the plot with 'q' window to exit.")
-        self.delta_t = 1/FPS
-        self.interval = 1000 / FPS  # in milliseconds
+        print("Commands:\n-Up/Down to increase/decrease commanded speed\n"
+        "-Left/Right to increase/decrease heading\n"
+        "-Space to stop the robot\n"
+        "-Close the plot with 'q' window to exit.")
 
-        self.uni = Unicycle(dt=self.delta_t)
+        print("\n\n\nExplanation:\n\nGreen landmarks are visible, grey are not."
+              "The robot is blue, its heading is red." \
+              "The true trajectory is green dashed, the EKF estimated trajectory is red dashed.")
 
-        self.imu = IMU(dt=self.delta_t)
-        self.camera = Camera(dt=self.delta_t)
-        self.ctrl = KeyboardController(self.uni)
 
-        rng = np.random.default_rng(42)
-        num_landmarks = N_LANDMARKS
-        coords = rng.uniform(AREA_LOWER_BOUND, AREA_UPPER_BOUND, size=(num_landmarks, 2))
-        landmark_positions = [tuple(coord) for coord in coords]
-        self.landmarks = [np.array(pos, dtype=float) for pos in landmark_positions]
+        # ----------------------------
+        # Simulation parameters: 
+        # ----------------------------
+        self.delta_t = 1/FPS # simulation time step
+        self.interval = 1000 / FPS  # visualization interval in milliseconds
+
+        self.uni = Unicycle(dt=self.delta_t) # Instantiate the robot unicycle model
+
+        self.imu = IMU(dt=self.delta_t) # Instantiate the planar IMU model
+        self.camera = Camera(dt=self.delta_t) # Instantiate the camera model
+        self.ctrl = KeyboardController(self.uni) # Instantiate the keyboard controller
+
+        # Generate random landmarks
+        rng = np.random.default_rng(42) # Seed generator for reproducibility
+        num_landmarks = N_LANDMARKS # Select number of landmarks from above
+        coords = rng.uniform(AREA_LOWER_BOUND, AREA_UPPER_BOUND, size=(num_landmarks, 2)) # Uniformly distribute landmarks in the area
+        landmark_positions = [tuple(coord) for coord in coords] # Convert to list of tuples for easier handling
+        self.landmarks = [np.array(pos, dtype=float) for pos in landmark_positions] # Convert to list of numpy arrays
         
-        self.ekf = ExtendedKalmanFilter()
+        self.ekf = ExtendedKalmanFilter() # Instantiate the Extended Kalman Filter for estimation
 
-        self.fig, self.ax = plt.subplots()
+        # ----------------------------
+        # Visualization setup
+        # ----------------------------
+
+        self.fig, self.ax = plt.subplots() # Create matplotlib figure and axis for visualization
         self.ax.set_aspect("equal")
         self.ax.set_xlim(AREA_LOWER_BOUND-1, AREA_UPPER_BOUND+1)
         self.ax.set_ylim(AREA_LOWER_BOUND-1, AREA_UPPER_BOUND+1)
         self.ax.grid(True)
 
+        # Position some text box for commands and info
+        self.cmd_text = self.ax.text(
+        0.02, 0.98, "",                 # position in axes coords
+        transform=self.ax.transAxes,    # axes-relative coordinates
+        fontsize=10,
+        verticalalignment="top",
+        bbox=dict(boxstyle="round", facecolor="white", alpha=0.8), usetex=True
+        )
+
+        # Plot some landmark markers
         self.visible_landmarks = self.ax.scatter(*zip(*landmark_positions), marker='x', color='grey')
 
+        # Instantiate colors so that we can update visible landmarks in green
         self.colors = np.full(len(self.landmarks), 'red')
 
-        # robot body marker
+        # Robot body marker to draw 
         self.body, = self.ax.plot([], [], "bo", markersize=8)
-        # heading arrow
+        # Heading direction marker
         self.head, = self.ax.plot([], [], "r-", linewidth=2)
 
+        # Instantiate a true and estimated robot trajectory to draw
         self.trajectory, = self.ax.plot([], [], "g--", linewidth=1)
         self.estimated_trajectory, = self.ax.plot([], [], "m--", linewidth=1)
-        self.predicted_trajectory, = self.ax.plot([], [], "b--", linewidth=1)
-        # self.visible_landmarks = self.ax.scatter([], [], marker='o', color='cyan', s=50, label='Visible Landmarks')
+
+        # Count frames to refresh command text periodically
+        self.frame_i = 0
+
 
     def init_sim(self):
+        # Initialize the simulation visualization
         self.body.set_data([], [])
         self.head.set_data([], [])
+
         return self.body, self.head
     
     def update(self, frame): 
 
         """
-        We take the duration of one frame and we split it so that we have one IMU step at the beginning and one in the middle, then a camera step at 0.75 of the frame.
+        Update function for each simulation frame.
+
+        The update takes the current visualization frame as input and performs the IMU measurement, the EKF prediction
+        the camera measurement and the EKF update. 
+        Later, it updates the robot and landmark visualization and pushes the physics of the unicycle forward.
         """
         
         # One frame means we run 1 IMU and 1 camera step
+
+        # IMU measurement from current state, input and delta_t
         meas = self.imu.step(self.uni.state, self.uni.u, delta_t=self.delta_t) 
 
+        # We use the measurement to predict the next state with the EKF
         self.ekf.predict(imu_measurement=meas)
 
-        
-
+        # Camera measurement from current state and landmarks
         camera_measurements = self.camera.step(self.landmarks, self.uni.state[0:2], self.uni.state[3]) 
 
+        # Use the camera measurements to update the EKF, correcting the prediction
         kalman_estimate = self.ekf.update(camera_measurements, delta_t=self.delta_t)
 
+        # Update landmark colors based on visibility
         colors =  np.repeat(np.array([[0.5, 0.5, 0.5, 1.0]]), len(self.landmarks), axis=0) # grey for not visible
+        
+        # Each visible landmark will be colored green
         for landmark in camera_measurements['landmarks']:
             index =  np.where(self.landmarks == landmark)
 
             colors[index[0]] = [0, 1, 0, 1]  # green for visible
 
-        self.visible_landmarks.set_facecolors(colors)
-        self.visible_landmarks.set_edgecolors(colors)
+        # Set the scatter plot colors
+        self.visible_landmarks.set_facecolors(colors) #Face
+        self.visible_landmarks.set_edgecolors(colors) #Edge 
 
-        
-
+        # Extract current true state for visualization
         x, y, v, th = self.uni.state
 
+        # Helper function to plot the robot, it is called immediately below
         def plot_robot():
+            
+            # update robot body position
             self.body.set_data([x], [y])
-            # heading arrow length
+
+            # heading arrow length computation and update
             hx = x + HEADING_ARROW_LENGTH * np.cos(th)
             hy = y + HEADING_ARROW_LENGTH * np.sin(th)
             self.head.set_data([x, hx], [y, hy])
+            
             # update trajectory
             self.trajectory.set_data(*zip(*[state[:2] for state in self.uni.states_log]))
             self.estimated_trajectory.set_data(*zip(*[state[:2].flatten() for state in self.ekf.estimated_states_log]))
-            self.predicted_trajectory.set_data(*zip(*[state[:2].flatten() for state in self.ekf.predicted_states_log]))
 
+        # Actually plot the robot
         plot_robot()
 
+        # Update command text every 60 frames as it would slow down the simulation otherwise
+        if self.frame_i % 60 == 0:
+            plt.pause(0.001)  # small pause to update the plot
+            self.cmd_text.set_text(
+            r"$v_{cmd}$" f"= {self.uni.v_cmd:+.2f}" r"$ \frac{m}{s²}$" f"\n"
+            r"$\theta_{cmd}$" f"={self.uni.theta_cmd/np.pi*180:+.2f}" r"$deg$" f"\n"
+            r"$v$" f"= {v:.2f}" r"$\frac{m}{s}$" f"\n"
+            r"$\theta$" f"= {th/np.pi*180:.2f} deg"
+            )
+
+        # Step the unicycle physics forward
         self.uni.step(delta_t=self.delta_t) 
-        return self.body, self.head, self.trajectory, self.estimated_trajectory, self.predicted_trajectory, self.visible_landmarks
+
+        # Update the frame counter
+        self.frame_i += 1
+
+        return self.body, self.head, self.trajectory, self.estimated_trajectory, self.visible_landmarks, self.cmd_text
 
    
 
     def run(self):
+        """
+        Call this method to effectively start the simulation with estimation.
+        It sets up the matplotlib animation and shows the plot.
+        """
 
+        # Connect the key press event to the KeyboardController function on_key
         self.fig.canvas.mpl_connect("key_press_event", self.ctrl.on_key)
-        self.ani = FuncAnimation(self.fig, self.update, init_func=self.init_sim, interval=self.interval, blit=True, cache_frame_data=False)
 
-        plt.show()
+        # Set up the animation function
+        self.ani = FuncAnimation(
+            self.fig,  # Figure object we define in __init__
+            self.update,  # Update function defined above
+            init_func=self.init_sim,  # Initialization function defined above
+            interval=self.interval,  # Interval between frames defined in __init__
+            blit=True, cache_frame_data=False)
+
+        plt.show() # Show the plot and start the animation loop
 
 
 def main():
-    sim  = SimulationWithEstimation()
+    """
+    This is the main function body that runs the simulation
+    """
+    sim  = SimulationWithEstimation() # Instantiate the simulation with estimation. This means that the constructor SimulationWithEstimation.__init__() is called here.
 
+    # Now we call the method that runs the simulation as we have defined it above.
     sim.run()
 
 
 
-if __name__ == "__main__":
-    main()
+if __name__ == "__main__": # This string allows us to run the main function only if this script is executed directly (python3 <script_name.py>), not imported as a module in other scripts.
+    
+
+    main() # Execute the main function defined above.
 
 
