@@ -96,61 +96,60 @@ class ExtendedKalmanFilter:
         b_omega = self.state[7, 0]  # gyroscope bias
         R_WB = rot2(th)  # Rotation matrix from body to world frame
 
-        dp = v
-        dv = R_WB @ (a_b - b_a)
-        dtheta = omega - b_omega
+        dp = v # position derivative
+        dv = R_WB @ (a_b - b_a) # velocity derivative
+        dtheta = omega - b_omega # orientation derivative
         db_a = np.zeros((2, 1))  # Assuming bias random walk is zero-mean
         db_omega = 0  # Assuming bias random walk is zero-mean
 
-        self.d_state = np.vstack((dp, dv, dtheta, db_a, db_omega))
+        #  Derivative of the state is just the concatenation of the derivatives we just computed in one vector 
+        self.d_state = np.vstack((dp, dv, dtheta, db_a, db_omega)) # vstack concatenates arrays vertically
 
-        # self.pred_state += d_state * self.dt
 
-        # Evolution of state covariance with Lyapunov equation
+        # Evolution of state covariance with Lyapunov equation (See theory here)
         self.P_dot = self.F @ self.P + self.P @ self.F.T + self.G @ self.Q @ self.G.T
 
-        # self.P += self.P_dot * self.dt
-
     
 
 
     
-
     def update(self, measurements, delta_t):
         """
-        Update the state estimate with measurement z.
-        x_pred: predicted state vector
-        z: measurement vector [x_meas, y_meas, z_meas]
+        Update the state estimate with measurements.
         """
 
-        landmarks = measurements['landmarks']  # Extract landmarks from measurements
+        landmarks = measurements['landmarks']  # Extract landmarks positions from measurements
         z = measurements['pixels']  # Extract pixels from measurements
 
 
-        
-
-        self.pred_state = self.d_state * delta_t + self.state
+        # Here we use the delta_t from when we called predict() to step the state forward
+        self.pred_state = self.d_state * delta_t + self.state # Euler integration to get predicted state
         self.pred_state[4, 0] = (self.pred_state[4, 0] + np.pi) % (2 * np.pi) - np.pi  # wrap theta to [-pi, pi]
-        self.predicted_states_log.append(copy.deepcopy(self.pred_state))
-        self.P += self.P_dot * delta_t
+        self.predicted_states_log.append(copy.deepcopy(self.pred_state)) # Log predicted state
 
+        self.P += self.P_dot * delta_t # Euler integration to get predicted covariance
+
+        # Check if there are no measurements
         if len(z) == 0:
+
+            # If we see no landmarks, we can only rely on the prediction
             self.state = self.pred_state
             self.estimated_states_log.append(copy.deepcopy(self.state))
             return copy.deepcopy(self.pred_state)
 
+        # Prepare measurement prediction and Jacobian
         z_predictions = np.zeros((len(z), 1))
         H = np.zeros((len(z), len(self.state)))  # Measurement Jacobian matrix
 
         self.R_matrix = np.eye(len(z)) * self.R  # Measurement noise covariance matrix
 
+        # Compute measurement predictions and Jacobians for each landmark
         for i, (z_i, landmark_i) in enumerate(zip(z, landmarks)):
+
             # Compute expected measurement
-            z_pred, H_i = self.measurement_model(self.pred_state, landmark_i)
-            z_predictions[i] = z_pred
-            H[i,:] = H_i
-
-
+            z_pred, H_i = self.measurement_model(self.pred_state, landmark_i) # Considering our predicted state, we compute how we expect the measurement to be
+            z_predictions[i] = z_pred # Store predicted measurement
+            H[i,:] = H_i # Store measurement Jacobian
 
         # Compute innovation covariance
         S = H @ self.P @ H.T + self.R_matrix
@@ -163,16 +162,17 @@ class ExtendedKalmanFilter:
         # print("K:", K)
 
         # Update state estimate
-        z_np = np.array(z).reshape(-1, 1)
-        y = z_np - z_predictions  # Measurement residual
-        self.state = self.pred_state + K @ y
+        z_np = np.array(z).reshape(-1, 1) # Convert measurements to numpy array
+        y = z_np - z_predictions  # Measurement residual: difference between actual and predicted measurements
+        self.state = self.pred_state + K @ y # Update state with Kalman gain and residual
         self.state[4, 0] = (self.state[4, 0] + np.pi) % (2 * np.pi) - np.pi  # wrap theta to [-pi, pi]
 
         # Update estimate error covariance
         I = np.eye(len(self.state))
-        self.P = (I - K @ H) @ self.P
+        self.P = (I - K @ H) @ self.P # Update covariance that we will use in the next iteration
 
-        self.estimated_states_log.append(copy.deepcopy(self.state))
+
+        self.estimated_states_log.append(copy.deepcopy(self.state)) # Log estimated state
 
         return copy.deepcopy(self.state)
 
@@ -180,23 +180,19 @@ class ExtendedKalmanFilter:
     def measurement_model(self, pred_state, landmark):
         """
         Measurement model h(x) that maps the state to the measurement space.
+        This is exactly the same projection model we use in the Camera class in the unicycle_estimation.py script.
         """
-        # Placeholder for actual measurement model
-        # This should compute the expected pixel coordinates given the state and landmark position
+        # This computes the expected pixel coordinates given the state and landmark position
 
         l_w = landmark.reshape((2, 1)) # Landmark position in world frame
-        p_w = pred_state[0:2]  # Position in world frame
+        p_w = pred_state[0:2]  # Robot predicted position in world frame
 
-        # print("L_w:\n", l_w)
-        # print("P_w:\n", p_w)
         th = pred_state[4, 0]  # Orientation angle
 
         R_WB = rot2(th)  
         R_BW = R_WB.T  # Rotation matrix from world to body frame (transpose of rotation from body to world frame)
 
         l_b = R_BW @ (l_w - p_w)  # Landmark position in body frame
-
-        # print("L_b:\n", l_b)
         
 
         # Find homogeneus landmark coordinates
@@ -205,8 +201,7 @@ class ExtendedKalmanFilter:
         # Project to pixel coordinates using camera intrinsics
         u = self.intrinsics @ l_tilde_b
 
-        # print("Predicted measurement u:\n", u)
-
+        # Compute measurement Jacobian
         H = self.measurement_jacobian(pred_state, l_w, l_b, R_BW, R_WB)
 
         return u, H
@@ -224,23 +219,18 @@ class ExtendedKalmanFilter:
         dl_tilde_b_d_l_b = np.array([
             [0, 0], 
             [-landmark_b[1, 0]/(landmark_b[0, 0]**2), 1/landmark_b[0, 0]]
-        ])
-        # print("dl_tilde_b_d_l_b:\n", dl_tilde_b_d_l_b)
+        ]) # Derivative of homogenous landmark coordinates in body frame w.r.t. landmark position in body frame
 
-        dl_b_dtheta = -R_BW @ hat2(1) @ (landmark_w - pred_state[0:2]) 
-        dl_b_d_p_w = -R_BW
+        dl_b_dtheta = -R_BW @ hat2(1) @ (landmark_w - pred_state[0:2]) # Derivative of landmark in body coordinates wrt orientation theta
+        dl_b_d_p_w = -R_BW # Derivative of landmark in body coordinates wrt robot position in world coordinates
 
-        # print("dl_b_dtheta:\n", dl_b_dtheta)
-        # print("dl_b_d_p_w:\n", dl_b_d_p_w)
 
-        dl_b_d_state = np.zeros((2, 8))
+        dl_b_d_state = np.zeros((2, 8)) # Preallocate derivative of landmark in body coordinates wrt state
 
-        dl_b_d_state[:, 0:2] = dl_b_d_p_w
+        dl_b_d_state[:, 0:2] = dl_b_d_p_w # Fill the matrix in the correct spots
         dl_b_d_state[:, 4] = dl_b_dtheta.reshape((2,))
 
-        du_d_state = du_dl_tilde_b @ dl_tilde_b_d_l_b @ dl_b_d_state
-
-        # print(du_d_state)
+        du_d_state = du_dl_tilde_b @ dl_tilde_b_d_l_b @ dl_b_d_state # Chain rule to get derivative of pixel coordinates wrt state
 
 
         return du_d_state
