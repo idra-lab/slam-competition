@@ -166,7 +166,7 @@ class ExtendedKalmanFilter:
         z_np = np.array(z).reshape(-1, 1)
         y = z_np - z_predictions  # Measurement residual
         self.state = self.pred_state + K @ y
-        self.state[4, 0] = self.state[4, 0]  % (2 * np.pi)  # wrap theta to [-pi, pi]
+        self.state[4, 0] = (self.state[4, 0] + np.pi) % (2 * np.pi) - np.pi  # wrap theta to [-pi, pi]
 
         # Update estimate error covariance
         I = np.eye(len(self.state))
