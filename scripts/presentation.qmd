@@ -429,4 +429,342 @@ $$
 
 - L'accelerazione e la velocità angolare misurate sono affette da bias e rumore bianco gaussiano.
 
-- Le misure sono espresse nel frame del robot.
+- Le misure sono espresse nel frame del robot, che indichiamo con B (Body frame).
+
+## Dinamica del bias
+- L'evoluzione dei bias è modellata come processi di passeggiata aleatoria (random walk):
+$$
+\begin{align*}
+\dot{b}_{a} & = n_{ba} \\
+\dot{b}_{\omega} & = n_{b\omega}
+\end{align*}
+$$
+
+- Dove modelliamo i termini come rumori bianchi gaussiani che rappresentano la variazione casuale dei bias nel tempo.
+
+## IMU 2D in python
+
+- Definiamo una classe `IMU`:
+
+    ```python
+    class IMU:
+        def __init__(self, dt,
+                    gyro_bias=0.001, accel_bias=(0.005, -0.003),
+                    gyro_noise_std=0.002, accel_noise_std=0.002,
+                    gyro_bias_rw_std=0.0005, accel_bias_rw_std=0.0002,
+                    seed=0):
+            self.dt = dt # time step
+        self.rng = np.random.default_rng(seed) # random number generator for reproducibility
+
+        self.bg = float(gyro_bias) # Initial gyroscope bias
+        self.ba = np.array(accel_bias, dtype=float) # Initial accelerometer bias
+
+
+        self.gyro_noise_std = float(gyro_noise_std) # Std deviation of gyroscope noise
+        self.accel_noise_std = float(accel_noise_std) # Std deviation of accelerometer noise
+
+        self.gyro_bias_rw_std = float(gyro_bias_rw_std) # Std deviation of gyro bias random walk
+        self.accel_bias_rw_std = float(accel_bias_rw_std) # Std deviation of acceleration bias random walk
+
+        self.log = []        # log of measurements     
+    ```
+- Introduciamo come parametri i valori iniziali di bias e le deviazioni standard del rumore e della passeggiata aleatoria.
+
+## IMU 2D in python
+
+- Le misure sono modellate nel metodo `step`:
+
+    ```python
+    def step(self, state, u, delta_t=None):        
+    ```
+- Il metodo accetta lo stato attuale del robot, gli input di controllo e un intervallo di tempo opzionale.
+
+- Per prima cosa, i bias vengono aggiornati con integrazione di Eulero in avanti:
+
+    ```python
+        # bias random walk update
+        self.bg +=  delta_t * self.rng.normal(scale=self.gyro_bias_rw_std)
+        self.ba +=  delta_t * self.rng.normal(scale=self.accel_bias_rw_std, size=2)
+    ```
+
+## IMU 2D in python
+
+- Successivamente, calcoliamo l'accelerazione nel sistema fisso (World Frame), derivando la velocità lineare:
+
+    $$
+    \begin{align*}
+    v_w & = v \cdot \begin{bmatrix} \cos(\theta) \\ \sin(\theta) \end{bmatrix} \\
+    a_w & = \frac{d v_w}{dt} = \frac{d v}{dt} \begin{bmatrix} \cos(\theta) \\ \sin(\theta) \end{bmatrix} + v \, \frac{d \theta}{dt} \begin{bmatrix} -\sin(\theta) \\ \cos(\theta) \end{bmatrix} \\
+    \end{align*}
+    $$
+
+- Il risultato è: 
+
+    $$ 
+    a_w = a \begin{bmatrix} \cos(\theta) \\ \sin(\theta) \end{bmatrix} + v \, \omega \begin{bmatrix} -\sin(\theta) \\ \cos(\theta) \end{bmatrix}
+    $$
+
+## IMU 2D in python
+
+- In python: 
+
+    ```python
+        # world acceleration
+        a_w = a * np.array([np.cos(th), np.sin(th)]) + omega * v * np.array([-np.sin(th), np.cos(th)])
+    ```
+
+- Le misure dell'IMU sono ottenute nel frame del robot (Body Frame) tramite la rotazione inversa, usando la funzione `rot2` per ottenere la matrice di rotazione 2D a partire dall'angolo di orientamento `th`:
+
+    ```python
+        # rotate to body frame
+        R = rot2(th)
+        ab = R.T @ a_w
+    ```
+    Il termine `R.T` rappresenta la trasposizione della matrice di rotazione, che corrisponde alla rotazione inversa. Mentre `@` indica la moltiplicazione matrice-vettore in numpy.
+
+## IMU 2D in python
+
+- Finalmente, possiamo implementare il modello di misura: 
+
+    ```python
+        # measurements with bias + noise
+        gyro_z = (omega + self.bg) + self.rng.normal(scale=self.gyro_noise_std)
+        accel_b = (ab + self.ba) + self.rng.normal(scale=self.accel_noise_std, size=2)
+    ```
+
+- Le misure sono salvate in un vettore `meas` e aggiunte al log delle misure:
+
+    ```python
+        meas = np.array([accel_b[0], accel_b[1], gyro_z]).reshape((3,1))
+        self.log.append(meas)
+        return meas
+    ```
+
+- La classe viene utilizzata instanziandola e chiamando il metodo `step` in un ciclo di simulazione.
+
+    ```python
+    imu = IMU(dt=0.02)
+    for t in range(500):
+        meas = imu.step(uni.state, uni.u)
+    ```
+
+
+## Camera 2D
+
+- La camera simula la misura di landmark fissi e noti nell'ambiente.
+
+- Assumiamo che guardi sempre in avanti lungo l'asse x del robot.
+
+- Il modello di misura è quello della camera stenopeica 2D (Pinhole camera model).
+
+- I parametri della camera sono la distanza focale `f` e il centro ottico `c`.
+
+## Camera 2D 
+
+- La camera misura la proiezione dei landmark nel frame del robot (Body Frame).
+
+- Dato un landmark: 
+$$
+\mathbf{l}_w = \begin{bmatrix} l_{w,x} \\ l_{w,y} \end{bmatrix}
+$$
+
+- Otteniamo un'"immagine" 1D contenente il landmark, espresso come un pixel sull'asse orizzontale `u`.
+
+## Camera 2D 
+
+- Per calcolare la proiezione, prima trasformiamo il landmark dal frame fisso (World Frame) al frame del robot (Body Frame):
+$$
+\mathbf{l}_b = R_{B,W}^T (\mathbf{l}_w - \mathbf{p}_w)
+$$
+
+- Poi otteniamo le coordinate omogenee del landmark nel frame della camera, prima ottenendo la proiezione prospettica: 
+$$
+\tilde{\mathbf{l}}_b = \begin{bmatrix} \frac{l_{b,x}}{l_{b,x}} \\ \frac{l_{b,y}}{l_{b,x}} \end{bmatrix} = 
+\begin{bmatrix} 1 \\ \frac{l_{b,y}}{l_{b,x}} \end{bmatrix}
+$$
+
+## Camera 2D 
+
+- Infine, otteniamo la coordinata del pixel `u` come:
+$$
+z = \begin{bmatrix} c & f \end{bmatrix} \begin{bmatrix} 1 \\ \frac{l_{b,y}}{l_{b,x}} \end{bmatrix} 
+= c + f \frac{l_{b,y}}{l_{b,x}}
+$$
+
+- Il modello di misura è affetto da rumore bianco gaussiano:
+$$
+z_{meas} = z + n_z
+$$
+
+## Verifica del campo visivo (FOV)
+
+- Per verificare se un landmark è visibile dalla camera, controlliamo due condizioni:
+    - Il landmark deve essere davanti alla camera: 
+    $$ 
+    l_{b,x} > 0
+    $$
+    - L'angolo tra l'asse della camera e la direzione verso il landmark deve essere entro il campo visivo definito dall'angolo di apertura `fov`:
+    $$
+    |\arctan(\frac{l_{b,y}}{l_{b,x}})| \leq \frac{fov}{2}
+    $$
+
+## Camera 2D in python
+
+- Definiamo una classe `Camera`:
+
+    ```python
+    def __init__(self, intrinsics=np.array([0, 1]), dt=1.5):
+        self.intrinsics = intrinsics  # Placeholder for camera intrinsics
+        self.fov = np.pi / 4  # 45 degrees field of view
+        self.min_range = 1.0
+        self.max_range = 10.0
+        self.noise = 0.001  # pixel noise standard deviation
+
+        self.dt = dt
+    ```
+
+- Implementiamo i metodi `project` e `check_fov` per la proiezione dei landmark e la verifica del campo visivo.
+
+    ```python
+    def project(self, landmark_pos, robot_pos, R_BW)
+        
+    def check_fov(self, landmark_pos, robot_pos, robot_theta)
+    ```
+
+## Camera 2D in python
+
+- Possiamo combinare il metodo `step` in un ciclo di simulazione insieme all'uniciclo per ottenere le misure dei landmark visibili:
+
+    ```python
+    
+    uni = Unicycle()
+    camera = Camera()
+
+
+    landmarks = [np.array([5.0, 2.0]), np.array([8.0, -1.0]), np.array([3.0, 4.0])]
+
+    uni.v_cmd = 1.0  # comando di velocità lineare desiderato
+    uni.theta_cmd = np.pi / 4  # comando di orientamento desiderato
+        
+    for t in range(500):
+
+        camera_measurements = camera.step(uni.state[0:2], uni.state[3], landmarks)
+
+        uni.step()
+    ```
+        
+## Sistema multi-sensore
+
+- Combinando IMU e camera, otteniamo un sistema di sensori completo per l'uniciclo.
+
+- La IMU fornisce misure rumorose che permettono di connettere due pose consecutive.
+
+- La camera, tramite le posizioni note dei landmark, fornisce misure assolute che aiutano a correggere la deriva accumulata dall'IMU.
+
+- In python: 
+
+    ```python
+    uni = Unicycle(dt=0.02)
+    imu = IMU(dt=0.02)
+    camera = Camera(dt=0.02)
+
+    landmarks = [np.array([5.0, 2.0]), np.array([8.0, -1.0]), np.array([3.0, 4.0])]
+
+    for t in range(500):
+        imu_meas = imu.step(uni.state, uni.u)
+        camera_measurements = camera.step(uni.state[0:2], uni.state[3], landmarks)
+        uni.step()
+    ```
+
+
+# Filtro EKF
+
+## Filtro EKF 
+- Il filtro EKF combina le misure rumorose dell'IMU e della camera per stimare lo stato del robot uniciclo.
+
+- La fase di predizione utilizza la dinamica dell'IMU per prevedere il nuovo stato e la sua covarianza.
+
+- La fase di aggiornamento utilizza le misure della camera per correggere la stima dello stato e ridurre l'incertezza.
+
+## Stato dell'EKF 
+
+- Il nostro filtro stima lo stato dell'IMU ( e quindi del robot uniciclo) che include posizione, orientamento, velocità lineare e bias dei sensori:
+$$
+\mathbf{x} = \begin{bmatrix} x \\ y  \\ v_x \\ v_y \\ \theta \\ b_{a_x} \\ b_{a_y}  \end{bmatrix}
+$$
+
+## Input e modello dell'EKF
+- Gli input al filtro EKF sono le misure dell'IMU:
+$$
+\mathbf{u} = \begin{bmatrix} a_{meas,x} \\ a_{meas,y} \\ \omega_{meas} \end{bmatrix}
+$$
+
+- Il modello dinamico è basato sulla dinamica dell'IMU descritta in precedenza: 
+$$
+\dot{\mathbf{x}} = f_{IMU}(\mathbf{x}, \mathbf{u})
+$$
+
+## EKF Predizione
+
+- Calcolo dello stato predetto:
+    $$
+    \dot{\hat{\mathbf{x}}} =  \hat{f}_{IMU}
+    $$
+    $$
+    \hat{\mathbf{x}}_{t+1|t} = \hat{\mathbf{x}}_{t|t} + f_{IMU}(\hat{\mathbf{x}}_{t|t}, \mathbf{u}) \cdot dt
+    $$
+
+- Propagazione covarianza: 
+
+    $$
+    \dot{\mathbf{P}} = \mathbf{F} \mathbf{P} \mathbf{F}^T +  \mathbf{G} \mathbf{Q}_{IMU} \mathbf{G}^T
+    $$
+    $$
+    \mathbf{P}_{t+1|t} = \mathbf{P}_{t|t} + \dot{\mathbf{P}} \cdot dt
+    $$
+
+## Introduzione di misure
+
+- Data una misura della camera, si aggiorna lo stato dell'EKF. 
+
+- Calcola la predizione della misura:
+    $$
+    \hat{\mathbf{z}} = h(\hat{\mathbf{x}}_{t+1|t})
+    $$
+
+- Covarianza dell'innovazione:
+    $$
+    \mathbf{S} = \mathbf{H} \mathbf{P}_{t+1|t} \mathbf{H}^T + \mathbf{R}
+    $$
+
+- Calcolo del guadagno di Kalman:
+    $$
+    \mathbf{K} = \mathbf{P}_{t+1|t} \mathbf{H}^T \mathbf{S}^{-1}
+    $$
+
+## Aggiornamento dello stato
+- Aggiornamento di stato:
+    $$
+    \hat{\mathbf{x}}_{t+1|t+1} = \hat{\mathbf{x}}_{t+1|t} + \mathbf{K} (\mathbf{z}_{meas} - \hat{\mathbf{z}})
+    $$
+
+- Aggiornamento della covarianza
+    $$
+    \mathbf{P}_{t+1|t +1} = ( \mathbf{I} - \mathbf{K} \mathbf{H} ) \mathbf{P}_{t+1|t} 
+    $$
+
+## Jacobiani 
+
+- Trattandosi di sistemi non-lineari, è necessario calcolare i jacobiani delle funzioni di stato e di misura.
+
+- Questi sono ri-calcolati ad ogni passo del filtro EKF, utilizzando la stima corrente dello stato.
+
+- I jacobiani sono definiti come:
+    - Modello di stato:
+    $$
+    \mathbf{F} = \frac{\partial f_{IMU}}{\partial \mathbf{x}} \bigg|_{\hat{\mathbf{x}} , \quad \mathbf{u}}
+    $$
+    - Modello di misura:
+    $$
+    \mathbf{H} = \frac{\partial h}{\partial \mathbf{x}} \bigg|_{\hat{\mathbf{x}}}
+    $$

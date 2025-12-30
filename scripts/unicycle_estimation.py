@@ -124,20 +124,21 @@ class IMU:
                  gyro_noise_std=0.002, accel_noise_std=0.002,
                  gyro_bias_rw_std=0.0005, accel_bias_rw_std=0.0002,
                  seed=0):
-        self.dt = dt
-        self.rng = np.random.default_rng(seed)
+        
+        self.dt = dt # time step
+        self.rng = np.random.default_rng(seed) # random number generator for reproducibility
 
-        self.bg = float(gyro_bias)
-        self.ba = np.array(accel_bias, dtype=float)
+        self.bg = float(gyro_bias) # Initial gyroscope bias
+        self.ba = np.array(accel_bias, dtype=float) # Initial accelerometer bias
 
-        self.gyro_noise_std = float(gyro_noise_std)
-        self.accel_noise_std = float(accel_noise_std)
 
-        self.gyro_bias_rw_std = float(gyro_bias_rw_std)
-        self.accel_bias_rw_std = float(accel_bias_rw_std)
+        self.gyro_noise_std = float(gyro_noise_std) # Std deviation of gyroscope noise
+        self.accel_noise_std = float(accel_noise_std) # Std deviation of accelerometer noise
 
-        self.prev_vw = None  # previous world velocity (2,)
-        self.log = []        # list of dicts
+        self.gyro_bias_rw_std = float(gyro_bias_rw_std) # Std deviation of gyro bias random walk
+        self.accel_bias_rw_std = float(accel_bias_rw_std) # Std deviation of acceleration bias random walk
+
+        self.log = []        # log of measurements
 
     def step(self, state, u, delta_t=None):
 
@@ -147,13 +148,11 @@ class IMU:
         if delta_t is None:
             delta_t = self.dt
 
-        # bias random walk (optional, but realistic)
-        self.bg += self.gyro_bias_rw_std * np.sqrt(delta_t) * self.rng.normal()
-        self.ba += self.accel_bias_rw_std * np.sqrt(delta_t) * self.rng.normal(size=2)
+        # bias random walk update
+        self.bg +=  delta_t * self.rng.normal(scale=self.gyro_bias_rw_std)
+        self.ba +=  delta_t * self.rng.normal(scale=self.accel_bias_rw_std, size=2)
 
-        # world velocity
-        vw = np.array([v*np.cos(th), v*np.sin(th)])
-
+        # world acceleration
         a_w = a * np.array([np.cos(th), np.sin(th)]) + omega * v * np.array([-np.sin(th), np.cos(th)])
 
         # rotate to body frame
@@ -161,9 +160,9 @@ class IMU:
         ab = R.T @ a_w
 
         # measurements with bias + noise
-        gyro_z = (omega + self.bg) + self.gyro_noise_std * self.rng.normal()
-        accel_b = (ab + self.ba) + self.accel_noise_std * self.rng.normal(size=2)
-        
+        gyro_z = (omega + self.bg) + self.rng.normal(scale=self.gyro_noise_std)
+        accel_b = (ab + self.ba) + self.rng.normal(scale=self.accel_noise_std, size=2)
+
         meas = np.array([accel_b[0], accel_b[1], gyro_z]).reshape((3,1))
         self.log.append(meas)
 
@@ -193,9 +192,9 @@ class Camera:
 
         # Simple projection ignoring distortion etc.
         l_hat_b = landmark_body / landmark_body[0]  # Normalize by x (assuming pinhole at x=1)
-        u = self.intrinsics @ l_hat_b  # focal_length * y + principal_point
+        z = self.intrinsics @ l_hat_b  # focal_length * y + principal_point
 
-        return u  # 1 Dimensional pixel measurement
+        return z  # 1 Dimensional pixel measurement
 
     def check_fov(self, landmark_pos, robot_pos, robot_theta):
         """
@@ -243,7 +242,7 @@ class Camera:
                 z = self.project(lm, robot_pos, R_BW)
 
                 # Introduce fictitious noise
-                z += self.noise * np.random.normal(size=1) 
+                z += np.random.normal(size=1, scale=self.noise) 
 
                 # Append measurements and associated landmark
                 measurements['landmarks'].append(lm)
