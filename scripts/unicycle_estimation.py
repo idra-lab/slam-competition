@@ -28,23 +28,20 @@ class Unicycle:
         self.v_cmd = 0.0      # linear acceleration command
         self.theta_cmd = 0.0   # angular velocity command
 
-        self.u_cmd = np.array([self.a, self.omega], dtype=float)
-        self.previous_u_cmd = self.u_cmd.copy()
-
-        self.u = self.u_cmd.copy()
+        self.u = np.array([self.a, self.omega], dtype=float)
 
         self.states_log = [self.state.copy()]
 
         self.K_p = np.array([0.5, 2.0], dtype=float)  # Proportional gains for v and theta
 
     
-    def dynamics(self, state, u_cmd):
+    def dynamics(self, state, u):
 
         # Higher order dynamics for control inputs
         
         x, y, v, theta = state
 
-        a, omega = self.u
+        a, omega = u
 
 
         

@@ -1,0 +1,432 @@
+---
+title: "Uniciclo con EKF in Python"
+author: "Tommaso Faraci"
+format:
+  revealjs:
+    incremental: true   
+---
+
+## Panoramica
+
+- Modello del robot
+- Controllore Proporzionale
+- Modello dell'uniciclo in Python
+- Sensori
+- Filtro EKF
+- Controllo con tastiera
+- Visualizzazione
+
+# Modello del robot
+
+## Modello del robot
+
+- Definiamo il vettore di stato: 
+$$
+\mathbf{x} = \begin{bmatrix} x \\ y \\ \theta \end{bmatrix}
+$$
+
+- Partiamo dal modello cinematico: 
+$$
+\begin{align*}
+\dot{x} & = v \cos(\theta) \\
+\dot{y} & = v \sin(\theta) \\
+\dot{\theta} & = \omega
+\end{align*}
+$$
+
+## Modello del robot
+
+
+- Aggiungiamo la dinamica della velocità lineare come: 
+$$
+\dot{v} = a
+$$
+dove $$ a $$ è l'accelerazione lineare in avanti.
+
+## Modello del robot
+- La dinamica completa diventa:
+$$
+\begin{align*}
+\dot{x} & = v \cos(\theta) \\
+\dot{y} & = v \sin(\theta) \\
+\dot{\theta} & = \omega \\
+\dot{v} & = a
+\end{align*}
+$$
+
+- Possiamo definire il vettore degli input come: 
+$$\mathbf{u} = \begin{bmatrix} a \\ \omega \end{bmatrix}$$
+
+- La dinamica è un'equazione differenziale non lineare del tipo:
+$$\dot{\mathbf{x}} = f(\mathbf{x}, \mathbf{u})$$
+
+
+## Modello del robot
+
+- Per implementare numericamente l'evoluzione dello stato, usiamo l'integrazione di Eulero in avanti:
+$$
+\begin{align*}
+x_{t+1} & = x_t + \dot{x}_t \Delta t \\
+y_{t+1} & = y_t + \dot{y}_t \Delta t \\
+\theta_{t+1} & = \theta_t + \dot{\theta}_t \Delta t \\
+v_{t+1} & = v_t + \dot{v}_t \Delta t
+\end{align*}
+$$
+
+- In forma vettoriale: 
+$$\mathbf{x}_{t+1} = \mathbf{x}_t + f(\mathbf{x}_t, \mathbf{u}_t) \Delta t$$
+
+## Dynamica numerica in python
+
+```
+import numpy as np
+import matplotlib.pyplot as plt
+
+dt = 0.1  # passo di integrazione
+x = np.zeros((4, 1))  # stato iniziale [x, y, theta, v]
+u = np.array([[1.0], [0.1]])  # input [a, omega]
+
+def f(x, u):
+    # Funzione di stato
+    dot_x = x[3,0] * np.cos(x[2,0])
+    dot_y = x[3,0] * np.sin(x[2,0])
+    dot_v = u[0,0]
+    dot_theta = u[1,0]
+    return np.array([[dot_x], [dot_y], [dot_theta], [dot_v]])
+
+# Simulazione
+x_log = []
+for t in range(100):
+    x += f(x, u) * dt
+    x_log.append(x.copy())
+
+# Visualizzazione del percorso
+x_log = np.array(x_log).squeeze()
+plt.plot(x_log[:,0], x_log[:,1])
+plt.xlabel('X position')
+plt.ylabel('Y position')
+plt.title('Percorso del robot uniciclo')
+plt.axis('equal')
+plt.grid()
+plt.show()
+print("Stato finale:", x.flatten())
+```
+```{python}
+import numpy as np
+import matplotlib.pyplot as plt
+
+dt = 0.1  # passo di integrazione
+x = np.zeros((4, 1))  # stato iniziale [x, y, theta, v]
+u = np.array([[1.0], [0.1]])  # input [a, omega]
+
+def f(x, u):
+    # Funzione di stato
+    dot_x = x[3,0] * np.cos(x[2,0])
+    dot_y = x[3,0] * np.sin(x[2,0])
+    dot_v = u[0,0]
+    dot_theta = u[1,0]
+    return np.array([[dot_x], [dot_y], [dot_theta], [dot_v]])
+
+# Simulazione
+x_log = []
+for t in range(100):
+    x += f(x, u) * dt
+    x_log.append(x.copy())
+
+# Visualizzazione del percorso
+x_log = np.array(x_log).squeeze()
+plt.plot(x_log[:,0], x_log[:,1])
+plt.xlabel('X position')
+plt.ylabel('Y position')
+plt.title('Percorso del robot uniciclo')
+plt.axis('equal')
+plt.grid()
+plt.show()
+print("Stato finale:", x.flatten())
+```
+
+# Controllore Proporzionale
+
+## Controllore Proporzionale
+
+- Controllare l'accelerazione lineare e la velocità angolare da tastiera risulterebbe scomodo. 
+- Per semplicità, vogliamo invece controllare la velocità lineare e l'angolo di orientamento.
+- Introduciamo il vettore di comandi desiderati:
+$$\mathbf{u}_{cmd} = \begin{bmatrix} v_{cmd} \\ \theta_{cmd} \end{bmatrix}$$
+
+## Controllore Proporzionale
+
+- Definiamo l'errore tra i comandi desiderati e lo stato attuale:
+$$\mathbf{e} = \begin{bmatrix} v_{cmd} - v \\ \theta_{cmd} - \theta \end{bmatrix}$$
+- Usiamo un controllore proporzionale per calcolare gli input effettivi della dinamica:
+$$\mathbf{u} =  K_p^T \mathbf{e}$$
+dove $$K_p = \begin{bmatrix} K_{p,v} & K_{p,\theta} \end{bmatrix}$$ è il vettore di guadagni del controllore proporzionale.
+
+## Controllore Proporzionale in python
+
+```python
+import numpy as np
+import matplotlib.pyplot as plt
+
+dt = 0.1  # passo di integrazione
+K_p = np.array([0.5, 2.0], dtype=float) #guadagni proporzionali per v e theta
+
+theta_cmd = np.pi / 4  # comando di orientamento desiderato
+v_cmd = 1.0            # comando di velocità lineare desiderato
+
+u_cmd = np.array([v_cmd, theta_cmd], dtype=float)
+
+state = np.array([0.0, 0.0, 0.0, 0.0], dtype=float)  # stato iniziale [x, y, theta, v]
+
+def dynamics(state, u):
+
+    x, y, v, theta = state
+
+    a, omega = u
+
+    dx = v * np.cos(theta)
+    dy = v * np.sin(theta)
+    dv = a
+    dtheta = omega
+
+    return np.array([dx, dy, dv, dtheta], dtype=float)
+
+def control(state, u_cmd, K_p):
+    x, y, v, theta = state
+
+    e_v = u_cmd[0] - v
+    e_theta = u_cmd[1] - theta
+
+    a = K_p[0] * e_v
+    omega = K_p[1] * e_theta
+
+    return np.array([a, omega], dtype=float)
+
+
+# Simulazione
+state_log = []
+input_log = []
+times = np.arange(0, 10, dt)
+for t in range(len(times)):
+    u = control(state, u_cmd, K_p)
+    state += dynamics(state, u) * dt
+    state_log.append(state.copy())
+    input_log.append(u.copy())
+
+
+# Visualizzazione del percorso
+state_log = np.array(state_log).squeeze()
+input_log = np.array(input_log).squeeze()
+plt.plot(times, state_log[:,2], label='Velocità lineare (m/s)')
+plt.plot(times, input_log[:,0], label='Accelerazione lineare (m/s²)')
+plt.axhline(v_cmd, xmin=0, xmax=10, ls='--', color='r', label='v_cmd')
+plt.legend()
+plt.xlabel('Tempo (s)')
+plt.ylabel('Velocità e accelerazione lineare (m/s)')
+plt.title('Performance del controllore proporzionale')
+plt.axis('equal')
+plt.grid()
+plt.show()
+```
+
+```{python}
+import numpy as np
+import matplotlib.pyplot as plt
+
+dt = 0.1  # passo di integrazione
+K_p = np.array([0.5, 2.0], dtype=float) #guadagni proporzionali per v e theta
+
+theta_cmd = np.pi / 4  # comando di orientamento desiderato
+v_cmd = 1.0            # comando di velocità lineare desiderato
+
+u_cmd = np.array([v_cmd, theta_cmd], dtype=float)
+
+state = np.array([0.0, 0.0, 0.0, 0.0], dtype=float)  # stato iniziale [x, y, theta, v]
+
+def dynamics(state, u):
+   
+    x, y, v, theta = state
+
+    a, omega = u
+
+    dx = v * np.cos(theta)
+    dy = v * np.sin(theta)
+    dv = a
+    dtheta = omega
+
+    return np.array([dx, dy, dv, dtheta], dtype=float)
+
+def control(state, u_cmd, K_p):
+    x, y, v, theta = state
+
+    e_v = u_cmd[0] - v
+    e_theta = u_cmd[1] - theta
+
+    a = K_p[0] * e_v
+    omega = K_p[1] * e_theta
+
+    return np.array([a, omega], dtype=float)
+
+
+# Simulazione
+state_log = []
+input_log = []
+times = np.arange(0, 10, dt)
+for t in range(len(times)):
+    u = control(state, u_cmd, K_p)
+    state += dynamics(state, u) * dt
+    state_log.append(state.copy())
+    input_log.append(u.copy())
+
+
+# Visualizzazione del percorso
+state_log = np.array(state_log).squeeze()
+input_log = np.array(input_log).squeeze()
+plt.plot(times, state_log[:,2], label='Velocità lineare (m/s)')
+plt.plot(times, input_log[:,0], label='Accelerazione lineare (m/s²)')
+plt.axhline(v_cmd, xmin=0, xmax=10, ls='--', color='r', label='v_cmd')
+plt.legend()
+plt.xlabel('Tempo (s)')
+plt.ylabel('Velocità e accelerazione lineare (m/s)')
+plt.title('Performance del controllore proporzionale')
+plt.axis('equal')
+plt.grid()
+plt.show()
+```
+
+# Modello dell'uniciclo in Python
+
+## Struttura della classe
+
+- Definiamo una classe `Unicycle` per rappresentare il modello dell'uniciclo con dinamica e controllore proporzionale integrati.
+
+    ```python
+    class Unicycle:
+    ```
+
+
+- Inizializziamo attributi per lo stato, i comandi desiderati, i guadagni del controllore e la discretizzazione temporale.
+   
+    ```python
+    class Unicycle:
+        def __init__(self, x=0.0, y=0.0, v=0.0, theta=0.0, dt=0.02):
+            self.state = np.array([x, y, v, theta], float)
+            
+            self.dt = dt
+            self.a = 0.0
+            self.v = v
+            self.omega = 0.0
+
+            self.v_cmd = 0.0      # linear acceleration command
+            self.theta_cmd = 0.0   # angular velocity command
+
+            self.u = np.array([self.a, self.omega], dtype=float)
+
+            self.states_log = [self.state.copy()]
+
+            self.K_p = np.array([0.5, 2.0], dtype=float)  # Proportional gains for v and theta
+    ```
+
+## Struttura della classe
+
+- Implementiamo due metodi principali: `dynamics` per calcolare la dinamica del sistema e `step` che aggiorna lo stato in base agli input calcolati dal controllore proporzionale.
+
+    ```python
+        def dynamics(self, state, u):
+
+        # Higher order dynamics for control inputs
+        x, y, v, theta = state
+        a, omega = u
+
+        dx = v * np.cos(theta)
+        dy = v * np.sin(theta)
+        dv = a
+        dtheta = omega
+
+        return np.array([dx, dy, dv, dtheta], dtype=float)
+    ```
+
+
+## Struttura della classe
+
+- ```python
+def step(self, delta_t= None):
+
+    u_cmd = np.array([self.v_cmd, self.theta_cmd], dtype=float)
+    v = self.state[2]
+    theta = self.state[3]
+
+    error = u_cmd - np.array([v, theta], dtype=float)
+    error[1] = (error[1] + np.pi) % (2 * np.pi) - np.pi  # wrap angle error to [-pi, pi]
+
+    self.u = self.K_p * error # Acceleration and angular velocity commands are obtained proportionally
+
+    dstate = self.dynamics(self.state, self.u)
+    if delta_t is None:
+        delta_t = self.dt
+
+    self.state += dstate * delta_t
+    self.state[3] = (self.state[3] + np.pi) % (2 * np.pi) - np.pi  # wrap theta to [-pi, pi]
+    self.states_log.append(self.state.copy())
+    ```
+
+## Esempio di utilizzo
+
+- La classe viene instanziata: 
+
+    ```python
+    uni = Unicycle()
+    ```
+- Modificando gli attributi `v_cmd` e `theta_cmd` possiamo impostare i comandi desiderati: 
+
+    ```python
+    uni.v_cmd = 1.0  # comando di velocità lineare desiderato
+    uni.theta_cmd = np.pi / 4  # comando di orientamento desiderato
+    ```
+
+- Il metodo `step` viene chiamato in un ciclo per simulare il movimento del robot uniciclo:
+
+    ```python
+    for t in range(500):
+        uni.v_cmd = 1.0  # comando di velocità lineare desiderato
+        uni.theta_cmd = np.pi / 4  # comando di orientamento desiderato
+        uni.step()
+    ```
+
+- Avendo definito l'attributo `states_log`, possiamo accedere allo storico degli stati del robot:
+
+    ```python
+    states = uni.states_log
+    ```
+
+<!-- 
+
+
+
+
+
+
+SENSORI
+
+
+
+
+ -->
+
+
+# Sensori
+
+## IMU 2D 
+- Misura l'accelerazione lineare e la velocità angolare nel piano 2D.
+
+- Modello di misura:
+$$
+\begin{align*}
+a_{meas} & = a + b_{a} + n_{a} \\
+\omega_{meas} & = \omega + b_{\omega} + n_{\omega} 
+\end{align*}
+$$
+
+- L'accelerazione e la velocità angolare misurate sono affette da bias e rumore bianco gaussiano.
+
+- Le misure sono espresse nel frame del robot.
