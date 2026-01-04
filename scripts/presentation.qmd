@@ -701,26 +701,50 @@ $$
 
 - Il modello dinamico è basato sulla dinamica dell'IMU descritta in precedenza: 
 $$
-\dot{\mathbf{x}} = f_{IMU}(\mathbf{x}, \mathbf{u})
+\dot{\mathbf{x}} = f_{IMU}(\mathbf{x}, \mathbf{u}_t)
 $$
 
-## EKF Predizione
+## Rumore di processo
+- Il vettore di rumore di processo è definito come: 
+$$
+\mathbf{n}_{IMU} = \begin{bmatrix} n_{a_x} \\ n_{a_y} \\ n_{\omega} \\ n_{b_{a_x}} \\ n_{b_{a_y}} \\ n_{b_{\omega}} \end{bmatrix}
+$$
+
+## Covarianze del rumore
+
+- Vi si associa una matrice di covarianza dipendente dalla IMU stessa:
+$$
+\mathbf{Q}_{IMU} = diag (\sigma_{a_x}^2, \sigma_{a_y}^2, \sigma_{\omega}^2, \sigma_{b_{a_x}}^2, \sigma_{b_{a_y}}^2, \sigma_{b_{\omega}}^2)
+$$
+
+## Rumore di misura
+- Il rumore di misura della camera è anch'esso modellato come rumore bianco gaussiano con covarianza:
+$$
+\sigma_{z}^2
+$$
+
+- Per ogni landmark misurato, viene introdotta una misura indipendente con lo stesso modello di rumore, ottenendo una matrice di covarianza complessiva:
+$$
+\mathbf{R} = diag (\sigma_{z_1}^2, \sigma_{z_2}^2, ..., \sigma_{z_n}^2)
+$$
+
+## Predizione
 
 - Calcolo dello stato predetto:
     $$
-    \dot{\hat{\mathbf{x}}} =  \hat{f}_{IMU}
+    \dot{\hat{\mathbf{x}}}_{t|t} =  \hat{f}_{IMU}(\hat{\mathbf{x}}_{t|t}, \mathbf{u}_t)
     $$
     $$
-    \hat{\mathbf{x}}_{t+1|t} = \hat{\mathbf{x}}_{t|t} + f_{IMU}(\hat{\mathbf{x}}_{t|t}, \mathbf{u}) \cdot dt
+    \hat{\mathbf{x}}_{t+1|t} = \hat{\mathbf{x}}_{t|t} + \hat{f}_{IMU}(\hat{\mathbf{x}}_{t|t}, \mathbf{u}_t) \cdot dt
     $$
 
 - Propagazione covarianza: 
 
     $$
-    \dot{\mathbf{P}} = \mathbf{F} \mathbf{P} \mathbf{F}^T +  \mathbf{G} \mathbf{Q}_{IMU} \mathbf{G}^T
+    \dot{\mathbf{P}}_t = \mathbf{F}_t \mathbf{P}_{t|t} \mathbf{F}_t^T +  \mathbf{G}_t \mathbf{Q}_{IMU,t} \mathbf{G}_t^T
     $$
     $$
-    \mathbf{P}_{t+1|t} = \mathbf{P}_{t|t} + \dot{\mathbf{P}} \cdot dt
+    \mathbf{P}_{t+1|t} = \mathbf{P}_{t|t} + \dot{\mathbf{P}}_t \cdot dt
     $$
 
 ## Introduzione di misure
@@ -729,42 +753,268 @@ $$
 
 - Calcola la predizione della misura:
     $$
-    \hat{\mathbf{z}} = h(\hat{\mathbf{x}}_{t+1|t})
+    \tilde{\mathbf{z}}_{t+1|t} = h(\hat{\mathbf{x}}_{t+1|t})
     $$
 
 - Covarianza dell'innovazione:
     $$
-    \mathbf{S} = \mathbf{H} \mathbf{P}_{t+1|t} \mathbf{H}^T + \mathbf{R}
+    \mathbf{S}_t = \mathbf{H}_t \mathbf{P}_{t+1|t} \mathbf{H}_t^T + \mathbf{R}_t
     $$
 
 - Calcolo del guadagno di Kalman:
     $$
-    \mathbf{K} = \mathbf{P}_{t+1|t} \mathbf{H}^T \mathbf{S}^{-1}
+    \mathbf{K}_t = \mathbf{P}_{t+1|t} \mathbf{H}_t^T \mathbf{S}_t^{-1}
     $$
 
 ## Aggiornamento dello stato
 - Aggiornamento di stato:
     $$
-    \hat{\mathbf{x}}_{t+1|t+1} = \hat{\mathbf{x}}_{t+1|t} + \mathbf{K} (\mathbf{z}_{meas} - \hat{\mathbf{z}})
+    \hat{\mathbf{x}}_{t+1|t+1} = \hat{\mathbf{x}}_{t+1|t} + \mathbf{K}_t (\mathbf{z}_t - \tilde{\mathbf{z}}_t)
     $$
 
 - Aggiornamento della covarianza
     $$
-    \mathbf{P}_{t+1|t +1} = ( \mathbf{I} - \mathbf{K} \mathbf{H} ) \mathbf{P}_{t+1|t} 
+    \mathbf{P}_{t+1|t +1} = ( \mathbf{I} - \mathbf{K}_t \mathbf{H}_t ) \mathbf{P}_{t+1|t} 
     $$
 
 ## Jacobiani 
 
 - Trattandosi di sistemi non-lineari, è necessario calcolare i jacobiani delle funzioni di stato e di misura.
 
-- Questi sono ri-calcolati ad ogni passo del filtro EKF, utilizzando la stima corrente dello stato.
+- In generale, questi sono ri-calcolati ad ogni passo del filtro EKF, utilizzando la stima corrente dello stato.
+
+- Possono essere calcolati analiticamente oppure numericamente tramite differenze finite.
+
+## Jacobiani
 
 - I jacobiani sono definiti come:
-    - Modello di stato:
     $$
     \mathbf{F} = \frac{\partial f_{IMU}}{\partial \mathbf{x}} \bigg|_{\hat{\mathbf{x}} , \quad \mathbf{u}}
     $$
-    - Modello di misura:
+
     $$
     \mathbf{H} = \frac{\partial h}{\partial \mathbf{x}} \bigg|_{\hat{\mathbf{x}}}
     $$
+
+    $$ 
+    \mathbf{G} = \frac{\partial f_{IMU}}{\partial \mathbf{n}_{IMU}} \bigg|_{\hat{\mathbf{x}} , \quad \mathbf{u}}
+    $$
+
+## Jacobiano della dinamica
+$$
+\mathbf{F} = 
+\begin{bmatrix}
+\mathbf{0}_{2 \times 2} & \mathbf{I}_{2\times2} & \mathbf{0}_{2 \times 1} & \mathbf{0}_{2 \times 2} & \mathbf{0}_{2 \times 1} \\ 
+% 
+% 
+\mathbf{0}_{2 \times 2} & \mathbf{0}_{2 \times 2} & \frac{d \mathbf{v}}{d \theta} & -\mathbf{R}_{WB} & \mathbf{0}_{2 \times 1} \\
+\mathbf{0}_{1 \times 2} & \mathbf{0}_{1 \times 2} & 0 & \mathbf{0}_{1 \times 2} & -1 \\
+\mathbf{0}_{2 \times 2} & \mathbf{0}_{2 \times 2} & \mathbf{0}_{2 \times 1} & \mathbf{0}_{2 \times 2} & \mathbf{0}_{2 \times 1} \\
+\mathbf{0}_{1 \times 2} & \mathbf{0}_{1 \times 2} & 0 & \mathbf{0}_{1 \times 2} & 0
+\end{bmatrix}
+$$
+
+dove 
+$$
+\frac{d \mathbf{v}}{d \theta} = 
+\mathbf{R}_{WB} \begin{bmatrix}
+ 0 & -1 \\ 
+    1 & 0
+\end{bmatrix}  (\mathbf{a} - \mathbf{b}_a) = \mathbf{R}_{WB} 1{\hat{}} (\mathbf{a} - \mathbf{b}_a)
+$$
+
+## Jacobiano della dinamica in python
+```python
+
+self.F = np.zeros((8, 8))  # State transition Jacobian
+
+self.F[0:2, 2:4] = np.eye(2)
+temp  = R_WB @ hat2(1) @ (acc -b_a)
+self.F[2:4, 4] = temp.flatten()  # dv/dtheta
+self.F[2:4, 5:7] = -R_WB
+self.F[4, -1] = -1  # dtheta/db_omega
+```
+
+
+## Jacobiano del rumore di processo
+
+$$
+\mathbf{G} =
+\begin{bmatrix}
+\mathbf{0}_{2 \times 2} & \mathbf{0}_{2 \times 1} & \mathbf{0}_{2 \times 2} & \mathbf{0}_{2 \times 1} \\
+%
+%
+\mathbf{R}_{WB} & \mathbf{0}_{2 \times 1} & \mathbf{0}_{2 \times 2} & \mathbf{0}_{2 \times 1} \\
+%
+%
+\mathbf{0}_{1 \times 2} & 1 & \mathbf{0}_{1 \times 2} & 0 \\
+%
+%
+\mathbf{0}_{2 \times 2} & \mathbf{0}_{2 \times 1} & \mathbf{I}_{2 \times 2} & \mathbf{0}_{2 \times 1} \\
+%
+%
+\mathbf{0}_{1 \times 2} & 0 & \mathbf{0}_{1 \times 2} & 1
+\end{bmatrix}
+= \begin{bmatrix}
+\mathbf{0}_{2 \times 2} & \mathbf{0}_{2 \times 4} \\
+\mathbf{R}_{WB} & \mathbf{0}_{2 \times 4} \\
+\mathbf{0}_{4 \times 2} & \mathbf{I}_{4 \times 4} 
+\end{bmatrix}
+$$
+
+## Jacobiano del rumore di processo in python
+```python
+self.G = np.zeros((8, 6)) # Process noise Jacobian
+
+
+self.G[-4:, -4:] = np.eye(4)  # Process noise affects orientation
+#                               and biases
+
+
+self.G[2:4, 0:2] = R_WB  # Process noise affects velocity
+```
+
+## Jacobiani di processo in python
+```python
+def set_jacobians(self):
+
+        """
+        Set the Jacobian matrices for the EKF.
+        """
+
+        th = self.state[4, 0] # orientation angle
+        acc = self.imu_measurement[0:2] # acceleration in body frame
+        b_a = self.state[5:7] # accelerometer bias
+        b_omega = self.state[7,0] # gyroscope bias
+
+        R_WB = rot2(th)  # Rotation matrix from body to world frame
+
+        self.F = np.zeros((8, 8))  # State transition Jacobian
+
+        self.F[0:2, 2:4] = np.eye(2)
+        temp  = R_WB @ hat2(1) @ (acc -b_a)
+        self.F[2:4, 4] = temp.flatten()  # dv/dtheta
+        self.F[2:4, 5:7] = -R_WB
+        self.F[4, -1] = -1  # dtheta/db_omega
+
+        self.G = np.zeros((8, 6)) # Process noise Jacobian
+        
+
+        self.G[-4:, -4:] = np.eye(4)  # Process noise affects biases and orientation
+        self.G[2:4, 0:2] = R_WB  # Process noise affects velocity
+```
+
+## Jacobiano della misura
+- Si calcola il jacobiano della funzione di misura della camera rispetto allo stato sfruttando la 'chain rule' delle derivate. 
+
+- Possiamo scrivere la funzione di misura come:
+$$
+z= h(\mathbf{x}) = \mathbf{K} \tilde{\mathbf{l}}_b (\mathbf{l}_b)
+$$
+
+- Dove:
+$$
+\tilde{\mathbf{l}}_b (\mathbf{l}_b)   = \begin{bmatrix} 1 \\ \frac{l_{b,y}}{l_{b,x}} \end{bmatrix} 
+$$
+
+## Jacobiano della misura
+- Ricordando che: 
+$$
+\mathbf{l}_b = \mathbf{R}_{WB}^T (\mathbf{l}_w - \mathbf{p}_w)
+$$
+
+- Scriviamo: 
+$$
+\frac{\partial z}{\partial \mathbf{x}} = \frac{\partial z}{\partial \tilde{\mathbf{l}}_b} \cdot \frac{\partial \tilde{\mathbf{l}}_b}{\partial \mathbf{l}_b} \cdot \frac{\partial \mathbf{l}_b}{\partial \mathbf{x}}
+$$
+
+## Jacobiano della misura
+
+$$
+\frac{\partial z}{\partial \tilde{\mathbf{l}}_b} = 
+\frac{\partial}{\partial \tilde{\mathbf{l}}_b}(\mathbf{K} \tilde{\mathbf{l}}_b) =\mathbf{K} = \begin{bmatrix} c & f \end{bmatrix}
+$$
+
+
+$$ 
+\frac{\partial \tilde{\mathbf{l}}_b}{\partial \mathbf{l}_b} = 
+\begin{bmatrix}
+0 & 0 \\
+\frac{-l_{b,y}}{l_{b,x}^2} & \frac{1}{l_{b,x}}
+\end{bmatrix}
+$$
+
+$$
+\frac{\partial \mathbf{l}_b}{\partial \mathbf{x}} = \\
+\begin{bmatrix}
+ -\mathbf{R}_{WB}^T & \mathbf{0}_{2 \times 1} & - \mathbf{R}_{WB}^T \hat{1} (\mathbf{l}_w - \mathbf{p}_w) & \mathbf{0}_{2 \times 2} & \mathbf{0}_{2 \times 1}
+\end{bmatrix}
+$$
+
+
+## Jacobiano della misura in python
+```python
+def measurement_jacobian(self, pred_state, landmark_w, landmark_b, R_BW, R_WB):
+        """
+        Compute the measurement Jacobian H.
+        """
+
+        H = np.zeros((1, 8))  # Adjust size based on measurement dimension
+
+        du_dl_tilde_b = self.intrinsics # Derivative of pixel coordinates w.r.t. landmark homogenous coordinates in body frame
+        
+        dl_tilde_b_d_l_b = np.array([
+            [0, 0], 
+            [-landmark_b[1, 0]/(landmark_b[0, 0]**2), 1/landmark_b[0, 0]]
+        ]) # Derivative of homogenous landmark coordinates in body frame w.r.t. landmark position in body frame
+
+        dl_b_dtheta = -R_BW @ hat2(1) @ (landmark_w - pred_state[0:2]) # Derivative of landmark in body coordinates wrt orientation theta
+        dl_b_d_p_w = -R_BW # Derivative of landmark in body coordinates wrt robot position in world coordinates
+
+
+        dl_b_d_state = np.zeros((2, 8)) # Preallocate derivative of landmark in body coordinates wrt state
+
+        dl_b_d_state[:, 0:2] = dl_b_d_p_w # Fill the matrix in the correct spots
+        dl_b_d_state[:, 4] = dl_b_dtheta.reshape((2,))
+
+        du_d_state = du_dl_tilde_b @ dl_tilde_b_d_l_b @ dl_b_d_state # Chain rule to get derivative of pixel coordinates wrt state
+
+
+        return du_d_state
+```
+
+## EKF nella simulazione
+- All'interno della funzione `update` della simulazione, integriamo i passi di predizione e aggiornamento dell'EKF:
+
+    ```python
+    # One frame means we run 1 IMU and 1 camera step
+
+    # IMU measurement from current state, input and delta_t
+    meas = self.imu.step(self.uni.state, self.uni.u, delta_t=self.delta_t) 
+
+    # We use the measurement to predict the next state with the EKF
+    self.ekf.predict(imu_measurement=meas)
+
+    # Camera measurement from current state and landmarks
+    camera_measurements = self.camera.step(self.landmarks, self.uni.state[0:2], self.uni.state[3]) 
+
+    # Use the camera measurements to update the EKF, correcting the prediction
+    kalman_estimate = self.ekf.update(camera_measurements, delta_t=self.delta_t)
+    ```
+
+# Ottenere il codice
+
+Il codice è disponibile al seguente link:
+
+https://github.com/idra-lab/slam-competition
+
+
+# Visualizzazione dei risultati
+- La simulazione utilizza Matplotlib per visualizzare il percorso del robot uniciclo, le stime dell'EKF e le posizioni dei landmark.
+
+- La simulazione viene lanciata dalla cartella del workspace di ROS2 del progetto con il comando: 
+
+    ```bash
+    python3 src/slam-competition/scripts/unicycle_estimation.py
+    ```
+

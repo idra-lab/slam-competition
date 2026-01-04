@@ -53,8 +53,8 @@ class ExtendedKalmanFilter:
         b_omega = self.state[7,0] # gyroscope bias
 
         R_WB = rot2(th)  # Rotation matrix from body to world frame
-        
-        self.F = np.eye(8)  # State transition Jacobian
+
+        self.F = np.zeros((8, 8))  # State transition Jacobian
 
         self.F[0:2, 2:4] = np.eye(2)
         temp  = R_WB @ hat2(1) @ (acc -b_a)
@@ -67,12 +67,6 @@ class ExtendedKalmanFilter:
 
         self.G[-4:, -4:] = np.eye(4)  # Process noise affects biases and orientation
         self.G[2:4, 0:2] = R_WB  # Process noise affects velocity
-
-        self.previous_timestamp = 0.0
-        self.current_timestamp = 0.0
-
-        # print("Jacobian F:\n", self.F)
-        # print("Jacobian G:\n", self.G)
 
     
 
@@ -210,7 +204,6 @@ class ExtendedKalmanFilter:
         """
         Compute the measurement Jacobian H.
         """
-        # Placeholder for actual measurement Jacobian computation
 
         H = np.zeros((1, 8))  # Adjust size based on measurement dimension
 
